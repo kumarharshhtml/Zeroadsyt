@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ZEROADSYT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <style>
+        body { background: #000; color: #fff; font-family: sans-serif; touch-action: pan-y; -webkit-tap-highlight-color: transparent; }
+        .active-track { border: 2px solid #ef4444 !important; background: #111 !important; }
+        .track-item { display: flex; align-items: center; background: #0d0d0d; border: 1px solid #1a1a1a; margin-bottom: 10px; border-radius: 15px; overflow: hidden; position: relative; }
+        .drag-handle { width: 35px; height: 65px; display: flex; align-items: center; justify-content: center; background: #151515; cursor: grab; color: #444; font-size: 18px; }
+        .play-zone { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 10px; overflow: hidden; cursor: pointer; }
+        .action-btns { display: flex; height: 65px; align-items: center; }
+        .dl-btn { width: 45px; height: 100%; display: flex; align-items: center; justify-content: center; color: #22c55e; font-size: 18px; background: #151515; border-left: 1px solid #1a1a1a; text-decoration: none; }
+        .del-zone { width: 45px; height: 100%; display: flex; align-items: center; justify-content: center; color: #ff4444; font-size: 18px; background: #151515; border-left: 1px solid #1a1a1a; cursor: pointer; }
+        #progress-bar { width: 0%; height: 100%; background: #ef4444; transition: width 0.5s; }
+
+        /* --- New Modern Modal CSS --- */
+        #customModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 9999; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
+        .modal-content { background: #111; border: 1px solid #333; padding: 25px; border-radius: 30px; width: 85%; max-width: 350px; text-align: center; transform: scale(0.9); transition: 0.3s; }
+        .modal-active .modal-content { transform: scale(1); }
+    </style>
+</head>
+<body class="p-4">
+
+    <div id="customModal">
+        <div class="modal-content border-t-4 border-red-600">
+            <div class="text-red-600 text-4xl mb-4 text-center">⚠️</div>
+            <h2 class="text-xl font-bold mb-2">Attention!</h2>
+            <p class="text-zinc-400 text-sm mb-6 uppercase tracking-wider font-bold">Puri playlist saaf kar dein?</p>
+            <div class="flex gap-3">
+                <button onclick="closeModal()" class="flex-1 bg-zinc-800 text-white py-3 rounded-xl font-bold text-xs uppercase">Nahi</button>
+                <button onclick="confirmClear()" class="flex-1 bg-red-600 text-white py-3 rounded-xl font-bold text-xs uppercase shadow-lg shadow-red-900/20">Haan, Uda do</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="max-w-2xl mx-auto">
+        <div class="flex justify-between items-center mb-4">
+            <h1 class="text-2xl font-black italic tracking-tighter uppercase text-white">ZEROADS<span class="text-red-600">YT</span></h1>
+            <button onclick="openModal()" class="text-[10px] border border-red-900/50 text-red-700 px-3 py-1 rounded-full uppercase font-bold">Clear All</button>
+        </div>
+
+        <div class="rounded-3xl overflow-hidden border-2 border-red-600 bg-zinc-900 aspect-video mb-1">
+            <div id="player"></div>
+        </div>
+        <div class="w-full h-1 bg-zinc-800 mb-6 rounded-full overflow-hidden">
+            <div id="progress-bar"></div>
+        </div>
+
+        <div class="bg-zinc-900 p-4 rounded-3xl mb-6 border border-zinc-800">
+            <input type="text" id="ytUrl" placeholder="Link Paste Karein..." class="w-full p-4 bg-black rounded-2xl outline-none mb-3 text-red-500 font-bold border border-zinc-800">
+            <div class="flex gap-2">
+                <input type="text" id="searchInput" placeholder="Search..." oninput="filterPlaylist()" class="flex-1 p-3 bg-black rounded-xl outline-none text-zinc-400 border border-zinc-800 text-xs uppercase font-bold">
+                <button id="addBtn" class="bg-white text-black px-6 rounded-xl font-bold uppercase text-xs">Add</button>
+            </div>
+        </div>
+
+        <div id="playlistArea" class="pb-32"></div>
+    </div>
+
+    <script>
+        let ytPlayer;
+        let songList = JSON.parse(localStorage.getItem('zero_ads_final_v1')) || [];
+        let currentIdx = 0;
+
+        // --- Modal Control Logic ---
+        function openModal() { 
+            const m = document.getElementById('customModal');
+            m.style.display = 'flex';
+            setTimeout(() => m.classList.add('modal-active'), 10);
+        }
+        function closeModal() { 
+            const m = document.getElementById('customModal');
+            m.classList.remove('modal-active');
+            setTimeout(() => m.style.display = 'none', 300);
+        }
+        function confirmClear() {
+            songList = [];
+            save();
+            location.reload();
+        }
+
+        function onYouTubeIframeAPIReady() {
+            ytPlayer = new YT.Player('player', {
+                height: '100%', width: '100%',
+                videoId: songList.length > 0 ? songList[0].id : '',
+                playerVars: { 'playsinline': 1, 'autoplay': 0, 'rel': 0, 'controls': 1 },
+                events: { 
+                    'onReady': () => { refreshUI(); setupSort(); setInterval(updateProgress, 1000); }, 
+                    'onStateChange': (e) => { if(e.data === 0) playNext(); } 
+                }
+            });
+        }
+
+        function updateProgress() {
+            if(ytPlayer && ytPlayer.getDuration) {
+                let cur = ytPlayer.getCurrentTime();
+                let dur = ytPlayer.getDuration();
+                if(dur > 0) document.getElementById('progress-bar').style.width = (cur/dur*100) + "%";
+            }
+        }
+
+        function filterPlaylist() {
+            let term = document.getElementById('searchInput').value.toLowerCase();
+            document.querySelectorAll('.track-item').forEach(item => {
+                let title = item.querySelector('.song-title').innerText.toLowerCase();
+                item.style.display = title.includes(term) ? 'flex' : 'none';
+            });
+        }
+
+        async function fetchTitle(id) {
+            try {
+                const res = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${id}`);
+                const data = await res.json();
+                return data.title || "Video Track";
+            } catch (e) { return "Added Video"; }
+        }
+
+        document.getElementById('addBtn').onclick = async () => {
+            let val = document.getElementById('ytUrl').value;
+            let id = extractId(val);
+            if(id) {
+                let title = await fetchTitle(id);
+                songList.push({ id, title });
+                save(); refreshUI();
+                if(songList.length === 1) playSpecificSong(0);
+                document.getElementById('ytUrl').value = "";
+            }
+        };
+
+        function playSpecificSong(i) {
+            currentIdx = i;
+            ytPlayer.loadVideoById(songList[i].id);
+            ytPlayer.playVideo();
+            refreshUI();
+        }
+
+        function playNext() { if (currentIdx + 1 < songList.length) playSpecificSong(currentIdx + 1); }
+
+        function refreshUI() {
+            const area = document.getElementById('playlistArea');
+            area.innerHTML = '';
+            songList.forEach((song, i) => {
+                const item = document.createElement('div');
+                item.className = `track-item ${i === currentIdx ? 'active-track' : ''}`;
+                item.setAttribute('data-id', song.id);
+                
+                item.innerHTML = `
+                    <div class="drag-handle">⋮⋮</div>
+                    <div class="play-zone" onclick="playSpecificSong(${i})">
+                        <span class="song-title text-[10px] font-bold truncate uppercase text-zinc-200 pointer-events-none">${song.title}</span>
+                        <span class="text-[8px] text-zinc-500 font-bold uppercase mt-1">Touch to Play</span>
+                    </div>
+                    <div class="action-btns">
+                        <a href="https://www.youtubepp.com/watch?v=${song.id}" target="_blank" class="dl-btn">⬇️</a>
+                        <div class="del-zone" onclick="removeTrack(event, ${i})">✕</div>
+                    </div>
+                `;
+                area.appendChild(item);
+            });
+        }
+
+        function removeTrack(e, i) {
+            e.stopPropagation();
+            songList.splice(i, 1);
+            save();
+            if(songList.length === 0) location.reload();
+            else {
+                if(i === currentIdx) playSpecificSong(0);
+                else if(i < currentIdx) currentIdx--;
+                refreshUI();
+            }
+        }
+
+        function extractId(url) {
+            let reg = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+            let m = url.match(reg);
+            return (m && m[2].length == 11) ? m[2] : null;
+        }
+
+        function setupSort() {
+            Sortable.create(document.getElementById('playlistArea'), {
+                handle: '.drag-handle',
+                animation: 250,
+                onEnd: () => {
+                    let newList = [];
+                    let activeId = ytPlayer.getVideoData().video_id;
+                    document.querySelectorAll('.track-item').forEach((el, index) => {
+                        let id = el.getAttribute('data-id');
+                        let title = el.querySelector('.song-title').innerText;
+                        newList.push({ id, title });
+                        if(id === activeId) currentIdx = index;
+                    });
+                    songList = newList; save(); refreshUI();
+                }
+            });
+        }
+
+        function save() { localStorage.setItem('zero_ads_final_v1', JSON.stringify(songList)); }
+    </script>
+</body>
+</html>
